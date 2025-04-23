@@ -1,0 +1,272 @@
+public partial class MainWindow : Window
+{
+    
+    ObservableCollection<Presenter> presenters = new ObservableCollection<Presenter>();
+    List<Presenter> list;
+
+    ObservableCollection<string> typepartners;
+
+    public MainWindow()
+    {
+        InitializeComponent();
+        LoadData();
+        Display();
+    }
+
+    public void LoadData()
+    {
+        using var context = new User12Context();
+
+        list = context.Partners.Include(p => p.TypepartnerNavigation).Include(p => p.Productpartners).Select(p => new Presenter
+        {
+            Id = p.Id,
+            Name = p.Name,
+            Typepartner = p.Typepartner,
+            Director = p.Director,
+            Email = p.Email,
+            Phone = p.Phone,
+            Rate = p.Rate,
+            type = p.TypepartnerNavigation.Name,
+            Count = p.Productpartners.Sum(r => r.Count),
+            Address = p.Address,
+            Photopath = p.Photopath
+
+        }).ToList();
+
+        presenters = new ObservableCollection<Presenter>(list);
+        Vivod.ItemsSource = presenters;
+
+        var types =  context.Partnertypes.Select(p => p.Name).ToList();
+        typepartners = new ObservableCollection<string>(types);
+        typepartners.Insert(0, "Âûâåñòè âñå");
+        Filtr.ItemsSource = typepartners;
+        Filtr.SelectedIndex = 0;
+
+    }
+
+    public void Display()
+    {
+        var temp = list;
+
+        presenters.Clear();
+
+        if (!string.IsNullOrEmpty(Poisk.Text))
+        {
+            var serchword = Poisk.Text.ToLower();
+            temp = temp.Where(it => it.Name.ToLower().Contains(serchword)).ToList();
+        }
+
+        if (Filtr.SelectedIndex != 0 && Filtr.SelectedItem != null)
+        {
+            temp = temp.Where(it => it.type.Contains(Filtr.SelectedItem.ToString())).ToList();
+        }
+
+        switch (Sort.SelectedIndex)
+        {
+
+            case 1: temp = temp.OrderByDescending(temp => temp.Rate).ToList(); break;
+            case 2: temp = temp.OrderBy(temp => temp.Rate).ToList(); break;
+            default: break;
+        }
+
+        Kolvo.Text = $"{temp.Count}\\{list.Count}";
+
+        foreach (var item in temp)
+        {
+            presenters.Add(item);
+        }
+    }
+
+    private void Add_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var addEditWindow = new AddEditWindow();
+        addEditWindow.Closed += (s, args) => LoadData();
+        addEditWindow.Show();
+    }
+
+    private void Edit_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var selectedPartner = Vivod.SelectedItem as Partner;
+        if (selectedPartner != null)
+        {
+            var editWindow = new AddEditWindow();
+            editWindow.LoadPartnerDetails(selectedPartner);
+            editWindow.Closed += (s, args) => LoadData();
+            editWindow.Show();
+        }
+    }
+
+    private void HistoryProduct_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var selectedPartner = Vivod.SelectedItem as Partner;
+        if (selectedPartner != null)
+        {
+            var historyWindow = new HistoryWindow(selectedPartner.Id);
+            historyWindow.Show();
+        }   
+    }
+
+    private void Delete_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var selectedPartner = Vivod.SelectedItem as Partner;
+        if (selectedPartner != null)
+        {
+            using var context = new User12Context();
+            var partnerToRemove = context.Partners.Find(selectedPartner.Id);
+
+            if (partnerToRemove != null)
+            {
+                context.Partners.Remove(partnerToRemove);
+                context.SaveChanges();
+                presenters.Remove(presenters.FirstOrDefault(p => p.Id == selectedPartner.Id));
+            }
+        }
+    }
+
+
+    public class Presenter : Partner
+    {
+        public Bitmap Image
+        {
+            get
+            {
+                try
+                {
+                    return new Bitmap(Photopath);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+        }
+
+
+    }
+}
+
+
+
+
+
+public partial class AddEditWindow : Window
+{
+    private string? _imagePath;
+
+    public Partner? Partner { get; set; }
+
+    public AddEditWindow()
+    {
+        InitializeComponent();
+        LoadType();
+    }
+
+    private void LoadType()
+    {
+        using var context = new User12Context();
+        var partnerTypes = context.Partnertypes.ToList();
+        TypeBox.ItemsSource = partnerTypes;
+    }
+
+    private async void AddPhoto_Click(object sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var bmp = await SelectImageAndSaveImage();
+        if (bmp != null)
+        {
+            PartImage.Source = bmp;
+        }
+    }
+
+
+    private void Save_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        using var context = new User12Context();
+
+        if (Partner != null && TypeBox.SelectedItem == null)
+        {
+            ShowError("заполните ComboBox!");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Naimenovanie.Text) ||
+            string.IsNullOrWhiteSpace(Rate.Text) ||
+            string.IsNullOrWhiteSpace(AddressText.Text) ||
+            string.IsNullOrWhiteSpace(Phone.Text) ||
+            string.IsNullOrWhiteSpace(FIO.Text) ||
+            string.IsNullOrWhiteSpace(Email.Text) ||
+            TypeBox.SelectedItem == null)
+        {
+            ShowError("заполните все поля!");
+            return;
+        }
+
+        if (Partner != null)
+        {
+            Partner.Name = Naimenovanie.Text;
+            Partner.Phone = Phone.Text;
+            Partner.Director = FIO.Text;
+            Partner.Email = Email.Text;
+            Partner.Rate = int.Parse(Rate.Text);
+            Partner.Address = AddressText.Text;
+            Partner.Typepartner = ((Partnertype)TypeBox.SelectedItem).Id;
+            context.Partners.Update(Partner);
+        }
+        else
+        {
+            int maxId = context.Partners.Max(p => p.Id);
+            var newPartner = new Partner
+            {
+                Id = maxId + 1,
+                Name = Naimenovanie.Text,
+                Phone = Phone.Text,
+                Director = FIO.Text,
+                Email = Email.Text,
+                Rate = int.Parse(Rate.Text),
+                Address = AddressText.Text,
+                Typepartner = ((Partnertype)TypeBox.SelectedItem).Id,
+
+                Photopath = _imagePath ?? Partner?.Photopath
+
+
+            };
+
+            context.Partners.Add(newPartner);
+        }
+
+        context.SaveChanges();
+        Close();
+    }
+
+
+    private void Back_Click(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        Close();
+    }
+
+
+    private void ShowError(string message)
+    {
+        var box = MessageBoxManager
+            .GetMessageBoxStandard("ошибка", message, ButtonEnum.Ok);
+        box.ShowAsync();
+    }
+
+
+    public void LoadPartnerDetails(Partner partner)
+    {
+        Partner = partner;
+        Naimenovanie.Text = partner.Name;
+        Rate.Text = partner.Rate.ToString();
+        AddressText.Text = partner.Address;
+        Phone.Text = partner.Phone;
+        FIO.Text = partner.Director;
+        Email.Text = partner.Email;
+        TypeBox.SelectedItem = partner.TypepartnerNavigation;
+
+        if (!string.IsNullOrEmpty(partner.Photopath))
+        {
+            PartImage.Source = new Bitmap(partner.Photopath);
+        }
+
+    }
+}
